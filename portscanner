@@ -1,0 +1,85 @@
+import socket
+import threading
+import queue
+import sys
+from datetime import datetime
+import argparse
+
+def scan_port(target, port, results):
+    """Scan a single port on the target host."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((target, port))
+        
+        if result == 0:
+            try:
+                # Attempt banner grabbing
+                sock.send(b'HEAD / HTTP/1.0\r\n\r\n')
+                banner = sock.recv(1024).decode('utf-8', errors='ignore').strip()
+                results.put((port, 'open', banner))
+            except:
+                results.put((port, 'open', 'No banner available'))
+        sock.close()
+    except socket.gaierror:
+        print(f"\n[-] Hostname could not be resolved: {target}")
+        sys.exit(1)
+    except socket.error:
+        pass
+
+def scan_range(target, start_port, end_port):
+    """Scan a range of ports on the target host."""
+    print(f"\n[*] Scanning {target} from port {start_port} to {end_port}")
+    print(f"[*] Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    results = queue.Queue()
+    threads = []
+    
+    # Create and start threads for each port
+    for port in range(start_port, end_port + 1):
+        t = threading.Thread(target=scan_port, args=(target, port, results))
+        threads.append(t)
+        t.start()
+    
+    # Wait for all threads to complete
+    for t in threads:
+        t.join()
+    
+    # Collect and sort results
+    open_ports = []
+    while not results.empty():
+        open_ports.append(results.get())
+    
+    open_ports.sort()  # Sort by port number
+    
+    # Print results
+    if open_ports:
+        print("\n[+] Open ports found:")
+        print("PORT\tSTATE\tSERVICE")
+        for port, state, banner in open_ports:
+            print(f"{port}\t{state}\t{banner}")
+    else:
+        print("\n[-] No open ports found.")
+    
+    print(f"\n[*] Scan completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Advanced Port Scanner with Banner Grabbing")
+    parser.add_argument("target", help="Target IP address or hostname")
+    parser.add_argument("-s", "--start-port", type=int, default=1, help="Starting port number (default: 1)")
+    parser.add_argument("-e", "--end-port", type=int, default=1024, help="Ending port number (default: 1024)")
+    args = parser.parse_args()
+    
+    try:
+        # Resolve hostname to IP
+        target_ip = socket.gethostbyname(args.target)
+        scan_range(target_ip, args.start_port, args.end_port)
+    except KeyboardInterrupt:
+        print("\n[-] Scan terminated by user.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[-] An error occurred: {str(e)}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
